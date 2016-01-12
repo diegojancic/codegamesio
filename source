@@ -1,0 +1,540 @@
+# ---------------------------------------------------------
+# AI Ship Controller for codegames.io
+# Diego Jancic, December 2015
+# ---------------------------------------------------------
+# The code is pretty dirty I have to admit, I had to 
+# workaround a few bugs and develop on trial and error
+# because of the lack of debugging tools in CodeGames
+# (it's just a game!)
+# This code won the 3rd tournament, but rules have changed
+# and this tactic is not longer useful, however you might
+# find some logic useful for your own spaceship.
+# ---------------------------------------------------------
+
+
+# CONSTANTS
+corner_search_speed = 5
+if (inbattle_speed == 0)
+  inbattle_speed = 4
+end
+inbattle_turnspeed = inbattle_speed*3  #3.5
+acceleration = 1000
+turn_radius_at_speed5 = 250.16
+turn_radius_at_speed1 = 22.79
+first_shoot_precision = 1
+shoot_speed_var_adj = 0.8
+enemy_init_attack_min = 50
+enemy_init_attack_max = 500
+max_time_attacking = 80
+min_time_protecting = 70
+command_gozero = 1
+command_attack = 2
+max_distance_to_zero = 200 + inbattle_speed * 40
+max_attack_cost = 650
+
+corrected_direction = direction - 90
+if (corrected_direction < 0)
+	corrected_direction = 360 + corrected_direction
+end
+
+
+
+# ACTIVATE IN CASE OF WRONG CORNER DETECTED!
+ignore_current_corners = 0
+#inbattle_speed = 5
+
+#current_command = command_gozero
+
+
+# UNCOMMENT TO SKIP CORNER SEARCH
+#verlimitfound = 1
+#horlimitfound = 1
+#inbattle_turnspeed = 0
+
+# RESTART EVERYTHING ON DEAD
+if (last_lives == 1 and energy == 5 and corrected_direction == 0 and speed == 0)
+  initflag = 0
+end
+last_lives = energy
+
+
+if (initflag == 0)
+  #INITIALIZATION
+  enemy_behind_at_least_once = 0
+  verlimitfound = 0
+  horlimitfound = 0
+  stop = 0
+  measuring_distx = 0
+  measuring_disty = 0
+  current_posy = 0
+  current_posx = 0
+  
+  intersec_x = 0
+  intersec_y = 0
+  current_command = command_gozero
+  current_command_exec_time = 0
+  
+  enemy_pos3_x = 0
+  enemy_pos2_x = 0
+  enemy_pos1_x = 0
+  enemy_pos3_y = 0
+  enemy_pos2_y = 0
+  enemy_pos1_y = 0
+  enemyspeed = -1
+  
+  initflag = 1
+end
+
+# UNCOMMENT IN REAL BATTLE!
+if (enemy_visible == 1 and enemy_angle < 7 and enemy_angle > -7 and enemy_distance < 300)
+  fire
+  current_command = command_gozero
+  current_command_exec_time = 0
+end
+
+if (enemy_visible == 1 and enemy_angle < 30 and enemy_angle > -30 and enemy_distance < 50)
+  fire
+  current_command = command_gozero
+  current_command_exec_time = 0
+end
+
+if (enemy_visible == 1 and enemy_angle < 60 and enemy_angle > -60 and enemy_distance < 15)
+  fire
+  current_command = command_gozero
+  current_command_exec_time = 0
+end
+
+
+
+if verlimitfound == 0
+  findverlimit
+else
+  if (horlimitfound == 0)
+    findhorlimit
+  end
+end
+
+measure_position()
+
+distance_to_zero = sqrt(current_posy*current_posy+current_posx*current_posx)
+
+
+#TEST 
+if (distance_to_zero > 100)
+  inbattle_speed = 5
+else
+  inbattle_speed = distance_to_zero/20 + 1
+end
+
+
+if (verlimitfound == 1 and horlimitfound == 1)
+ # kill_the_bastard
+  current_command_exec_time = current_command_exec_time + 1
+  mapenemy()
+  
+#  if (enemy_mapped == 1)
+#    if (aimtoenemy())
+#         fireifpossible()
+#    end
+#  end
+  
+  if (distance_to_zero > max_distance_to_zero)
+		current_command = command_gozero
+    current_command_exec_time = 0
+  end
+  
+  last_cuadrante = cuadrante
+  if (current_posy > 0 and current_posx > 0)
+    cuadrante = 1
+  else if (current_posy > 0 and current_posx < 0)
+    cuadrante = 2
+  else if (current_posy < 0 and current_posx < 0)
+    cuadrante = 3
+  else if (current_posy < 0 and current_posx > 0)
+    cuadrante = 4
+  end
+  
+  if (last_cuadrante != cuadrante)
+    cuadrante_changed = 1
+  end
+  
+  if (enemy_visible == 0)
+	attack_cost = 99999
+  else
+	attack_cost = enemy_distance + abs(enemy_angle) * 5
+  end
+  
+  if (current_command == command_gozero and ignore_current_corners == 0)
+    # protect myself
+    total_time_zeroing = total_time_zeroing + 1
+  	go_to_point_zero
+    if (current_command_exec_time > min_time_protecting)
+      #ORIGINAL ALG:
+	  #if (enemy_visible == 1 and enemy_mapped == 1 and enemy_distance >= enemy_init_attack_min and enemy_distance <= enemy_init_attack_max and cuadrante_changed == 1)
+	  #NEW COST-BASED ALG:
+	  if (attack_cost < max_attack_cost and enemy_mapped == 1)
+        current_command = command_attack
+        current_command_exec_time = 0
+        cuadrante_changed = 0
+      end
+    end
+  else if (current_command == command_attack)
+    # attack 
+    total_time_attacking = total_time_attacking + 1
+    if (enemy_mapped == 1)
+      if (aimtoenemy())
+        fireifpossible()
+				current_command = command_gozero
+        current_command_exec_time = 0
+      else
+        faster(999)
+      end
+    else
+      faster(999)
+    end
+    
+    if (current_command_exec_time > max_time_attacking)
+      # if too much time attacking, fire just in case it was close
+      # and go to zero
+      fireifpossible()
+		  current_command = command_gozero
+      current_command_exec_time = 0
+    end
+  
+  else if (ignore_current_corners == 1)
+    total_time_attacking = total_time_attacking + 1
+    if (enemy_mapped == 1)
+      if (aimtoenemy())
+        fireifpossible()
+      else
+        faster(999)
+      end
+    else
+      faster(999)
+      right(rand(0,2))
+    end
+  end
+  
+end
+
+
+function measure_position()
+  if (measuring_distx)
+    current_posx = current_posx + cos(corrected_direction) * speed
+  end
+  if (measuring_disty)
+    current_posy = current_posy - sin(corrected_direction) * speed
+  end
+end
+
+function go_to_point_zero()
+  #(x, y)   this didn't work!!
+  if (speed < inbattle_speed*0.95)
+    faster(acceleration)
+  end
+  if (speed > inbattle_speed*1.05)
+    slower(acceleration)
+  end
+  
+  #faster(100)
+  angle_from_point = atan2(current_posy, current_posx) 
+  if (angle_from_point < 180)
+    angle_from_point = 180+angle_from_point
+  else
+    angle_from_point = angle_from_point-180
+  end
+  final_dir = 360 - angle_from_point
+  if (abs(corrected_direction - final_dir) > 180)
+  	turn_right = abs(final_dir - 360 - corrected_direction)
+  else
+  	turn_right = final_dir - corrected_direction
+  end
+  
+  # add some randomness
+  #if (abs(turn_right) < 10)
+  #  if (rand(-1,1) < 0)
+  #    turn_right = rand(0,3)
+  #  end
+  #end
+  
+  # not sure why, but this seems to work pretty well :)
+  if (abs(turn_right) > 100 and speed > inbattle_speed*0.3)
+	slower(acceleration)
+  end
+  
+  right(turn_right)
+  
+end
+
+function kill_the_bastard()
+  if (speed < inbattle_speed*0.95)
+    faster(acceleration)
+  end
+  if (speed > inbattle_speed*1.05)
+    slower(acceleration)
+  end
+  right(inbattle_turnspeed * (speed/inbattle_speed))
+end
+
+
+function findverlimit()
+  if (corrected_direction < 359 and corrected_direction > 1)
+    right(20)
+    return 0
+  end
+  
+  if (stop == 1)
+    verlimitfound = 1
+    lastenemyvisible = 1
+    enemy_behind_at_least_once = 0
+    stop = 0
+	
+	# test for accuracy (as we increment 'speed' steps, in average we will be 50% ahead of the center)
+	current_posx = current_posx - cos(direction) * speed/2
+	
+    return 0
+  end
+  
+  if (lastenemyvisible == 0 and enemy_visible == 1 and enemy_behind_at_least_once == 1)
+    stop = 1
+    measuring_distx = 1
+    if (enemy_angle < 0)
+    	go_up_instead = 0
+    else
+      go_up_instead = 1
+    end
+  else if (speed < corner_search_speed)
+    faster(acceleration)
+  end
+  
+  if (enemy_visible == 0)
+    enemy_behind_at_least_once = 1
+  end
+  
+  lastenemyvisible = enemy_visible
+end
+
+function findhorlimit()
+  if (go_up_instead == 0)
+    if (corrected_direction < 89 or corrected_direction > 91)
+      right(90-corrected_direction)
+      return 0
+    end
+  else
+	if (corrected_direction == 0)
+		left(999)
+		return 0
+	else if (corrected_direction < 269 or corrected_direction > 271)
+      left(corrected_direction-270)
+      return 0
+    end
+  end
+  
+  if (stop == 1)
+    measure = 1
+    horlimitfound = 1
+    lastenemyvisible = 1
+	
+	# test for accuracy (as we increment 'speed' steps, in average we will be 50% ahead of the center)
+	current_posy = current_posy + sin(direction) * speed/2
+    return 0
+  end
+  
+  if (lastenemyvisible == 0 and enemy_visible == 1 and enemy_behind_at_least_once == 1)
+    stop = 1
+    measuring_disty = 1
+  else if (speed < corner_search_speed)
+    faster(acceleration)
+  end
+  
+  if (enemy_visible == 0)
+    enemy_behind_at_least_once = 1
+  end
+  
+  lastenemyvisible = enemy_visible
+end
+
+
+
+##################### FIRE LOGIC
+
+
+function mapenemy()
+  if (enemy_visible == 0)
+    enemy_pos3_x = 0
+    enemy_pos2_x = 0
+    enemy_pos1_x = 0
+    enemy_pos3_y = 0
+    enemy_pos2_y = 0
+    enemy_pos1_y = 0
+    enemyspeed = -1
+	enemy_mapped = 0
+    return 0
+  end
+  
+  absolute_enemy_angle = corrected_direction + enemy_angle
+  enemyx = current_posx + cos(absolute_enemy_angle)*enemy_distance
+  enemyy = current_posy - sin(absolute_enemy_angle)*enemy_distance
+  
+  ## update new position
+  enemy_pos3_x = enemy_pos2_x
+  enemy_pos2_x = enemy_pos1_x
+  enemy_pos1_x = enemyx
+  
+  enemy_pos3_y = enemy_pos2_y
+  enemy_pos2_y = enemy_pos1_y
+  enemy_pos1_y = enemyy
+   
+  enemy_mapped = 1
+  return 1
+end
+
+function aimtoenemy()
+  # LINEAR TRACE USING 2 POINTS
+  if (enemy_pos2_x == 0 or enemy_pos1_x == 0)
+    return 0
+  end
+  
+  # calcular shoot_speed_var_adj based on the distance.
+  if (enemy_distance < 800)
+		shoot_speed_var_adj = 1 - enemy_distance / 1000
+  else 
+		shoot_speed_var_adj = 1
+  end
+  
+  enemyspeed = sqrt((enemy_pos2_x - enemy_pos1_x)*(enemy_pos2_x - enemy_pos1_x)+(enemy_pos2_y - enemy_pos1_y)*(enemy_pos2_y - enemy_pos1_y))
+  enemyspeed = enemyspeed * shoot_speed_var_adj
+  
+  enemy_movementy = enemy_pos2_y - enemy_pos1_y
+  enemy_movementx = enemy_pos2_x - enemy_pos1_x
+  if (abs(enemy_movementy) < 1)
+    enemy_movementy = 0
+  end
+  if (abs(enemy_movementx) < 1)
+    enemy_movementx = 0
+  end
+  
+  enemyangle = atan2(enemy_movementy, enemy_movementx)
+  
+  # TEST
+  if (enemy_visible == 0 or enemy_distance > 200)
+  	faster(acceleration)
+  else
+    faster((enemyspeed - speed)*5)
+  end
+  
+  enemyspeedy = enemyspeed * sin(enemyangle)
+  enemyspeedx = enemyspeed * cos(enemyangle)
+  #interceptfnc(current_posx, current_posy, enemy_pos1_x, enemy_pos1_y, enemyspeedx, enemyspeedy, 10)
+  
+  ## REMOVED FUNCTION INTERCEPT BECAUSE IT WAS NOT WORKING
+  # PARAMETERS:
+	src_x = current_posx
+  src_y = current_posy
+  dst_x = enemy_pos1_x
+  dst_y = enemy_pos1_y
+  dst_vx = -enemyspeedx
+  dst_vy = -enemyspeedy
+	v  = 10
+  
+  # INTERCEPT FUNCTION START
+	tx = dst_x - src_x
+	ty = dst_y - src_y
+  tvx = dst_vx
+  tvy = dst_vy
+
+	# Get quadratic equation components
+	a = tvx*tvx + tvy*tvy - v*v
+	b = 2 * (tvx * tx + tvy * ty)
+	c = tx*tx + ty*ty
+
+	# Solve quadratic, See quad(), below
+	tsa = quad(a, b, c, 0)
+	tsb = quad(a, b, c, 1)
+  
+	# Find smallest positive solution
+	intersec_x = 0
+	intersec_y = 0
+	if (tsa != 0 or tsb != 0)
+		t = min(tsa, tsb)
+		if (t < 0)
+			t = max(tsa, tsb)
+		end
+		if (t > 0)
+		  intersec_x = dst_x + dst_vx*t
+		  intersec_y = dst_y + dst_vy*t
+    else
+      return 0
+		end
+  else
+    return 0
+	end
+  # INTERCEPT FUNCTION END
+  
+  aimdirection = atan2(intersec_y-current_posy, intersec_x-current_posx)*-1
+  
+  if (aimdirection < 0)
+    aimdirection = aimdirection + 360
+  end
+  if (abs(corrected_direction - aimdirection) > 180)
+  	turn_right = abs(aimdirection - 360 - corrected_direction)
+  else
+  	turn_right = aimdirection - corrected_direction
+  end
+    
+  right(turn_right)
+  
+  if (abs(turn_right) < first_shoot_precision)
+    return 1
+  end
+  
+  return 0
+end
+
+function fireifpossible()
+  fire
+end
+
+
+
+####### EXTERNAL FUNCTIONS
+
+# Return solutions for quadratic
+function quad(a,b,c, solnumber)
+  sol = 0
+  if (abs(a) < 0.01)
+    if (abs(b) < 0.01)
+			sol = 0
+    else
+			sol = -c/b   # sol1 = -c/b
+    end
+  else
+    disc = b*b - 4*a*c
+    if (disc >= 0)
+      disc = sqrt(disc)
+      a = 2*a
+      if (solnumber == 0)
+        sol = (-b-disc)/a
+      else
+        sol = (-b+disc)/a
+      end
+    end
+  end
+  return sol
+end
+
+function max(valmaxa, valmaxb)
+  if (valmaxa > valmaxb)
+    return valmaxa
+  else
+    return valmaxb
+  end
+end
+
+function min(valmina, valminb)
+  if (valmina > valminb)
+    return valminb
+  else
+    return valmina
+  end
+end
